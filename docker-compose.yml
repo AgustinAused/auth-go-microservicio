@@ -17,30 +17,57 @@ services:
     networks:
       - auth_network
 
-  # Aplicación de autenticación
+  # Keycloak Identity Provider
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0.2
+    container_name: auth_keycloak
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: postgres
+      KC_DB_PASSWORD: password
+      KC_HOSTNAME_STRICT: false
+      KC_HOSTNAME_STRICT_HTTPS: false
+    ports:
+      - "8081:8080"
+    depends_on:
+      - postgres
+    command: start-dev
+    networks:
+      - auth_network
+
+  # Microservicio de autenticación
   auth-service:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: auth_service
     environment:
-      - PORT=8080
-      - ENV=development
+      - SERVER_PORT=8080
+      - SERVER_HOST=0.0.0.0
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_USER=postgres
       - DB_PASSWORD=password
       - DB_NAME=auth_service
-      - DB_SSL_MODE=disable
-      - JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
-      - JWT_EXPIRATION=24h
-      - REFRESH_TOKEN_EXPIRATION=168h
-      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8080
+      - DB_SSLMODE=disable
+      - JWT_SECRET_KEY=your-super-secret-jwt-key-change-this-in-production
+      - JWT_ACCESS_EXPIRY=15
+      - JWT_REFRESH_EXPIRY=7
+      - KEYCLOAK_ENABLED=true
+      - KEYCLOAK_BASE_URL=http://keycloak:8080
+      - KEYCLOAK_REALM=master
+      - KEYCLOAK_CLIENT_ID=auth-service
+      - KEYCLOAK_CLIENT_SECRET=your-keycloak-client-secret
     ports:
       - "8080:8080"
     depends_on:
       - postgres
+      - keycloak
     networks:
       - auth_network
-    restart: unless-stopped
 
 volumes:
   postgres_data:

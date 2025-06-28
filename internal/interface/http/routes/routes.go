@@ -1,13 +1,15 @@
 package routes
 
 import (
+	"auth-go-microservicio/configs"
 	"auth-go-microservicio/internal/interface/http/handlers"
 	"auth-go-microservicio/pkg/middleware"
 
-	_ "auth-go-microservicio/docs" // Importar docs generados por swag
-
 	"github.com/gin-gonic/gin"
 	cors "github.com/rs/cors/wrapper/gin"
+
+	_ "auth-go-microservicio/docs" // Importar docs generados por swag
+
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
@@ -16,7 +18,10 @@ import (
 func SetupRoutes(
 	authHandler *handlers.AuthHandler,
 	userHandler *handlers.UserHandler,
+	keycloakHandler *handlers.KeycloakHandler,
 	authMiddleware *middleware.AuthMiddleware,
+	keycloakMiddleware *middleware.KeycloakMiddleware,
+	config *configs.Config,
 ) *gin.Engine {
 	router := gin.Default()
 
@@ -38,27 +43,48 @@ func SetupRoutes(
 		{
 			auth.POST("/register", authHandler.Register)
 			auth.POST("/login", authHandler.Login)
-			auth.POST("/logout", authHandler.Logout)
 			auth.POST("/refresh", authHandler.Refresh)
+			auth.POST("/logout", authHandler.Logout)
 		}
 
-		// Rutas de usuarios (requieren autenticación)
+		// Rutas de usuario (requieren autenticación)
 		users := v1.Group("/users")
 		users.Use(authMiddleware.Authenticate())
 		{
 			users.GET("/profile", userHandler.GetProfile)
 			users.PUT("/profile", userHandler.UpdateProfile)
 			users.DELETE("/profile", userHandler.DeleteAccount)
+			users.PUT("/change-password", userHandler.ChangePassword)
 		}
 
-		// Rutas de administración (requieren rol admin)
+		// Rutas de administración (requieren rol de admin)
 		admin := v1.Group("/admin")
 		admin.Use(authMiddleware.Authenticate())
-		admin.Use(authMiddleware.RequireAdmin())
+		admin.Use(authMiddleware.RequireRole("admin"))
 		{
 			admin.GET("/users", userHandler.ListUsers)
 			admin.PUT("/users/:id", userHandler.UpdateUser)
 			admin.DELETE("/users/:id", userHandler.DeleteUser)
+		}
+
+		// Rutas de Keycloak (si está habilitado)
+		if config.Keycloak.Enabled {
+			keycloak := v1.Group("/keycloak")
+			keycloak.Use(keycloakMiddleware.Authenticate())
+			keycloak.Use(keycloakMiddleware.RequireAdmin())
+			{
+				// Gestión de usuarios
+				keycloak.GET("/users", keycloakHandler.GetUsers)
+				keycloak.GET("/users/:id", keycloakHandler.GetUserByID)
+				keycloak.POST("/users", keycloakHandler.CreateUser)
+				keycloak.PUT("/users/:id", keycloakHandler.UpdateUser)
+				keycloak.DELETE("/users/:id", keycloakHandler.DeleteUser)
+
+				// Gestión de grupos
+				keycloak.GET("/users/:id/groups", keycloakHandler.GetUserGroups)
+				keycloak.PUT("/users/:id/groups/:group_id", keycloakHandler.AddUserToGroup)
+				keycloak.DELETE("/users/:id/groups/:group_id", keycloakHandler.RemoveUserFromGroup)
+			}
 		}
 	}
 

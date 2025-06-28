@@ -13,6 +13,7 @@ require (
 	github.com/swaggo/gin-swagger v1.6.0
 	github.com/swaggo/swag v1.16.4
 	golang.org/x/crypto v0.21.0
+	gopkg.in/square/go-jose.v2 v2.6.0
 )
 
 require (

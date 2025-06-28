@@ -21,25 +21,26 @@
 package main
 
 import (
-	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"auth-go-microservicio/configs"
+	"auth-go-microservicio/internal/domain/repositories"
 	"auth-go-microservicio/internal/interface/database/postgres"
 	"auth-go-microservicio/internal/interface/http/handlers"
 	"auth-go-microservicio/internal/interface/http/routes"
 	"auth-go-microservicio/internal/usecase"
 	"auth-go-microservicio/pkg/jwt"
+	"auth-go-microservicio/pkg/keycloak"
 	"auth-go-microservicio/pkg/middleware"
 	"auth-go-microservicio/pkg/password"
 
 	_ "github.com/lib/pq"
+
+	_ "auth-go-microservicio/docs" // Importar docs generados por swag
 )
 
 // @title           Microservicio de Autenticación API
@@ -82,60 +83,83 @@ func main() {
 	}
 
 	// Inicializar servicios
-	jwtService := jwt.NewService(config.JWTSecret, config.JWTExpiration, config.RefreshTokenExpiration)
+	jwtService := jwt.NewService(
+		config.JWT.SecretKey,
+		time.Duration(config.JWT.AccessExpiry)*time.Minute,
+		time.Duration(config.JWT.RefreshExpiry)*24*time.Hour,
+	)
 	passwordService := password.NewService(12) // bcrypt cost 12
 
 	// Inicializar repositorios
-	userRepo := postgres.NewUserRepository(db)
-	tokenRepo := postgres.NewTokenRepository(db)
+	var userRepo repositories.UserRepository
+	var tokenRepo repositories.TokenRepository
 
-	// Inicializar casos de uso
-	authUseCase := usecase.NewAuthUseCase(userRepo, tokenRepo, jwtService, passwordService)
-	userUseCase := usecase.NewUserUseCase(userRepo, passwordService)
+	// Si Keycloak está habilitado, usar repositorios de Keycloak
+	if config.Keycloak.Enabled {
+		keycloakService := keycloak.NewService(
+			config.Keycloak.BaseURL,
+			config.Keycloak.Realm,
+			config.Keycloak.ClientID,
+			config.Keycloak.ClientSecret,
+		)
 
-	// Inicializar handlers
-	authHandler := handlers.NewAuthHandler(authUseCase)
-	userHandler := handlers.NewUserHandler(userUseCase)
+		// Para Keycloak, podríamos usar repositorios híbridos o solo Keycloak
+		// Por ahora, mantenemos los repositorios de PostgreSQL para datos adicionales
+		userRepo = postgres.NewUserRepository(db)
+		tokenRepo = postgres.NewTokenRepository(db)
 
-	// Inicializar middleware
-	authMiddleware := middleware.NewAuthMiddleware(jwtService)
+		// Inicializar use cases
+		authUseCase := usecase.NewAuthUseCase(userRepo, tokenRepo, jwtService, passwordService)
+		userUseCase := usecase.NewUserUseCase(userRepo, passwordService)
 
-	// Configurar rutas
-	router := routes.SetupRoutes(authHandler, userHandler, authMiddleware)
+		// Inicializar middlewares
+		authMiddleware := middleware.NewAuthMiddleware(jwtService)
+		keycloakMiddleware := middleware.NewKeycloakMiddleware(keycloakService)
 
-	// Configurar servidor HTTP
-	server := &http.Server{
-		Addr:         ":" + config.Port,
-		Handler:      router,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
-	}
+		// Inicializar handlers
+		authHandler := handlers.NewAuthHandler(authUseCase)
+		userHandler := handlers.NewUserHandler(userUseCase)
+		keycloakHandler := handlers.NewKeycloakHandler(keycloakService)
 
-	// Canal para manejar señales de terminación
-	done := make(chan os.Signal, 1)
-	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+		// Configurar rutas
+		router := routes.SetupRoutes(authHandler, userHandler, keycloakHandler, authMiddleware, keycloakMiddleware, config)
 
-	// Iniciar servidor en una goroutine
-	go func() {
-		log.Printf("Starting server on port %s", config.Port)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		// Iniciar servidor
+		serverAddr := fmt.Sprintf("%s:%s", config.Server.Host, config.Server.Port)
+		log.Printf("🚀 Servidor iniciado en %s", serverAddr)
+		log.Printf("📚 Swagger UI disponible en http://%s/swagger/index.html", serverAddr)
+		log.Printf("🔐 Keycloak habilitado - Realm: %s", config.Keycloak.Realm)
+
+		if err := http.ListenAndServe(serverAddr, router); err != nil {
 			log.Fatal("Error starting server:", err)
 		}
-	}()
+	} else {
+		// Modo sin Keycloak (funcionalidad original)
+		userRepo = postgres.NewUserRepository(db)
+		tokenRepo = postgres.NewTokenRepository(db)
 
-	// Esperar señal de terminación
-	<-done
-	log.Println("Shutting down server...")
+		// Inicializar use cases
+		authUseCase := usecase.NewAuthUseCase(userRepo, tokenRepo, jwtService, passwordService)
+		userUseCase := usecase.NewUserUseCase(userRepo, passwordService)
 
-	// Crear contexto con timeout para el shutdown
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+		// Inicializar middleware
+		authMiddleware := middleware.NewAuthMiddleware(jwtService)
 
-	// Intentar cerrar el servidor gracefulmente
-	if err := server.Shutdown(ctx); err != nil {
-		log.Fatal("Server forced to shutdown:", err)
+		// Inicializar handlers
+		authHandler := handlers.NewAuthHandler(authUseCase)
+		userHandler := handlers.NewUserHandler(userUseCase)
+
+		// Configurar rutas (sin Keycloak)
+		router := routes.SetupRoutes(authHandler, userHandler, nil, authMiddleware, nil, config)
+
+		// Iniciar servidor
+		serverAddr := fmt.Sprintf("%s:%s", config.Server.Host, config.Server.Port)
+		log.Printf("🚀 Servidor iniciado en %s", serverAddr)
+		log.Printf("📚 Swagger UI disponible en http://%s/swagger/index.html", serverAddr)
+		log.Printf("🔐 Modo autenticación local (sin Keycloak)")
+
+		if err := http.ListenAndServe(serverAddr, router); err != nil {
+			log.Fatal("Error starting server:", err)
+		}
 	}
-
-	log.Println("Server exited")
 }

@@ -2,32 +2,49 @@ package configs
 
 import (
 	"os"
-	"time"
+	"strconv"
 
 	"github.com/joho/godotenv"
 )
 
-// Config contiene toda la configuración de la aplicación
+// Config estructura de configuración de la aplicación
 type Config struct {
-	// Servidor
+	Server   ServerConfig
+	Database DatabaseConfig
+	JWT      JWTConfig
+	Keycloak KeycloakConfig
+}
+
+// ServerConfig configuración del servidor
+type ServerConfig struct {
 	Port string
-	Env  string
+	Host string
+}
 
-	// Base de datos
-	DBHost     string
-	DBPort     string
-	DBUser     string
-	DBPassword string
-	DBName     string
-	DBSSLMode  string
+// DatabaseConfig configuración de la base de datos
+type DatabaseConfig struct {
+	Host     string
+	Port     string
+	User     string
+	Password string
+	DBName   string
+	SSLMode  string
+}
 
-	// JWT
-	JWTSecret              string
-	JWTExpiration          time.Duration
-	RefreshTokenExpiration time.Duration
+// JWTConfig configuración de JWT
+type JWTConfig struct {
+	SecretKey     string
+	AccessExpiry  int // en minutos
+	RefreshExpiry int // en días
+}
 
-	// CORS
-	AllowedOrigins []string
+// KeycloakConfig configuración de Keycloak
+type KeycloakConfig struct {
+	BaseURL      string
+	Realm        string
+	ClientID     string
+	ClientSecret string
+	Enabled      bool
 }
 
 // Load carga la configuración desde variables de entorno
@@ -36,31 +53,36 @@ func Load() (*Config, error) {
 	godotenv.Load()
 
 	config := &Config{
-		// Servidor
-		Port: getEnv("PORT", "8080"),
-		Env:  getEnv("ENV", "development"),
-
-		// Base de datos
-		DBHost:     getEnv("DB_HOST", "localhost"),
-		DBPort:     getEnv("DB_PORT", "5432"),
-		DBUser:     getEnv("DB_USER", "postgres"),
-		DBPassword: getEnv("DB_PASSWORD", "password"),
-		DBName:     getEnv("DB_NAME", "auth_service"),
-		DBSSLMode:  getEnv("DB_SSL_MODE", "disable"),
-
-		// JWT
-		JWTSecret:              getEnv("JWT_SECRET", "your-super-secret-jwt-key"),
-		JWTExpiration:          parseDuration(getEnv("JWT_EXPIRATION", "24h")),
-		RefreshTokenExpiration: parseDuration(getEnv("REFRESH_TOKEN_EXPIRATION", "168h")), // 7 días
-
-		// CORS
-		AllowedOrigins: parseStringSlice(getEnv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8080")),
+		Server: ServerConfig{
+			Port: getEnv("SERVER_PORT", "8080"),
+			Host: getEnv("SERVER_HOST", "localhost"),
+		},
+		Database: DatabaseConfig{
+			Host:     getEnv("DB_HOST", "localhost"),
+			Port:     getEnv("DB_PORT", "5432"),
+			User:     getEnv("DB_USER", "postgres"),
+			Password: getEnv("DB_PASSWORD", "password"),
+			DBName:   getEnv("DB_NAME", "auth_service"),
+			SSLMode:  getEnv("DB_SSLMODE", "disable"),
+		},
+		JWT: JWTConfig{
+			SecretKey:     getEnv("JWT_SECRET_KEY", "your-secret-key"),
+			AccessExpiry:  getEnvAsInt("JWT_ACCESS_EXPIRY", 15),
+			RefreshExpiry: getEnvAsInt("JWT_REFRESH_EXPIRY", 7),
+		},
+		Keycloak: KeycloakConfig{
+			BaseURL:      getEnv("KEYCLOAK_BASE_URL", "http://localhost:8080"),
+			Realm:        getEnv("KEYCLOAK_REALM", "master"),
+			ClientID:     getEnv("KEYCLOAK_CLIENT_ID", "auth-service"),
+			ClientSecret: getEnv("KEYCLOAK_CLIENT_SECRET", ""),
+			Enabled:      getEnvAsBool("KEYCLOAK_ENABLED", false),
+		},
 	}
 
 	return config, nil
 }
 
-// getEnv obtiene una variable de entorno con un valor por defecto
+// getEnv obtiene una variable de entorno o retorna un valor por defecto
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -68,40 +90,32 @@ func getEnv(key, defaultValue string) string {
 	return defaultValue
 }
 
-// parseDuration parsea una duración desde string
-func parseDuration(duration string) time.Duration {
-	parsed, err := time.ParseDuration(duration)
-	if err != nil {
-		// Valores por defecto si hay error
-		switch duration {
-		case "24h":
-			return 24 * time.Hour
-		case "168h":
-			return 168 * time.Hour
-		default:
-			return 24 * time.Hour
+// getEnvAsInt obtiene una variable de entorno como entero o retorna un valor por defecto
+func getEnvAsInt(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		if intValue, err := strconv.Atoi(value); err == nil {
+			return intValue
 		}
 	}
-	return parsed
+	return defaultValue
 }
 
-// parseStringSlice parsea un string separado por comas en un slice
-func parseStringSlice(input string) []string {
-	if input == "" {
-		return []string{}
+// getEnvAsBool obtiene una variable de entorno como booleano o retorna un valor por defecto
+func getEnvAsBool(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		if boolValue, err := strconv.ParseBool(value); err == nil {
+			return boolValue
+		}
 	}
-
-	// Por simplicidad, asumimos que no hay espacios alrededor de las comas
-	// En un caso real, podrías usar strings.Split y strings.TrimSpace
-	return []string{input} // Simplificado para este ejemplo
+	return defaultValue
 }
 
 // GetDSN retorna la cadena de conexión de la base de datos
 func (c *Config) GetDSN() string {
-	return "host=" + c.DBHost +
-		" port=" + c.DBPort +
-		" user=" + c.DBUser +
-		" password=" + c.DBPassword +
-		" dbname=" + c.DBName +
-		" sslmode=" + c.DBSSLMode
+	return "host=" + c.Database.Host +
+		" port=" + c.Database.Port +
+		" user=" + c.Database.User +
+		" password=" + c.Database.Password +
+		" dbname=" + c.Database.DBName +
+		" sslmode=" + c.Database.SSLMode
 }
