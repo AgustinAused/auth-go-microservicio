@@ -24,8 +24,9 @@ type User struct {
 type Role string
 
 const (
-	RoleUser  Role = "user"
-	RoleAdmin Role = "admin"
+	RoleUser      Role = "user"
+	RoleAdmin     Role = "admin"
+	RoleModerator Role = "moderator"
 )
 
 // NewUser crea una nueva instancia de User
@@ -38,6 +39,22 @@ func NewUser(email, password, firstName, lastName string) *User {
 		FirstName: firstName,
 		LastName:  lastName,
 		Role:      RoleUser, // Por defecto es usuario
+		IsActive:  true,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+}
+
+// NewUserWithRole crea una nueva instancia de User con un rol específico
+func NewUserWithRole(email, password, firstName, lastName string, role Role) *User {
+	now := time.Now()
+	return &User{
+		ID:        uuid.New(),
+		Email:     email,
+		Password:  password,
+		FirstName: firstName,
+		LastName:  lastName,
+		Role:      role,
 		IsActive:  true,
 		CreatedAt: now,
 		UpdatedAt: now,

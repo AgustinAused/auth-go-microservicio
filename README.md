@@ -1,77 +1,105 @@
 # 🔐 Microservicio de Autenticación y Autorización
 
-Un microservicio robusto de autenticación y autorización construido en Go siguiendo los principios de **Clean Architecture**. Soporta autenticación local y **integración con Keycloak** como proveedor de identidad.
+Un microservicio robusto de autenticación y autorización construido en Go siguiendo los principios de **Clean Architecture**. Soporta **dos modos de autenticación**: local (JWT) y Keycloak como Identity Provider.
 
-## ✨ Características
+## 🚀 Características
 
-- 🔐 **Autenticación JWT** con tokens de acceso y refresh
-- 🏗️ **Clean Architecture** con separación clara de responsabilidades
-- 🛡️ **Autorización basada en roles** y permisos
-- 🔄 **Integración con Keycloak** (Identity Provider)
-- 📚 **Documentación Swagger** automática
-- 🐳 **Docker y Docker Compose** listos para producción
-- 🗄️ **PostgreSQL** como base de datos
-- 🔒 **Hashing seguro** de contraseñas con bcrypt
-- 🌐 **CORS** configurado
-- 📝 **Logging** estructurado
+### ✅ Funcionalidades Principales
+- **Autenticación dual**: Local (JWT) o Keycloak
+- **Autorización por roles**: admin, moderator, user
+- **Gestión de usuarios**: registro, login, logout, refresh tokens
+- **Middleware de autenticación**: flexible y configurable
+- **Documentación automática**: Swagger/OpenAPI
+- **Base de datos**: PostgreSQL con migraciones
+- **Docker**: Contenedores listos para producción
+
+### 🔄 Modos de Autenticación
+
+#### 1. **Modo Local (JWT)**
+- Usuarios almacenados en PostgreSQL
+- Tokens JWT generados localmente
+- Gestión completa de refresh tokens
+- Ideal para aplicaciones simples
+
+#### 2. **Modo Keycloak**
+- Usuarios gestionados por Keycloak
+- Tokens JWT generados por Keycloak
+- Integración completa con Identity Provider
+- Ideal para aplicaciones empresariales
 
 ## 🏗️ Arquitectura
 
-### Sin Keycloak (Modo Local)
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   HTTP Client   │───▶│  Auth Service   │───▶│   PostgreSQL    │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-                              │
-                              ▼
-                       ┌─────────────────┐
-                       │   JWT Service   │
-                       └─────────────────┘
-```
-
-### Con Keycloak (Modo Integrado)
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   HTTP Client   │───▶│  Auth Service   │───▶│   Keycloak      │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-                              │
-                              ▼
-                       ┌─────────────────┐
-                       │   PostgreSQL    │
-                       │  (Datos extra)  │
-                       └─────────────────┘
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   Cliente       │    │  Microservicio   │    │   Keycloak      │
+│                 │    │                  │    │   (Opcional)    │
+│ Login/Register  │───▶│ AuthUseCase      │◄──▶│                 │
+│ (email/pass)    │    │ (Dual Mode)      │    │                 │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+                                │
+                                ▼
+                       ┌──────────────────┐
+                       │  PostgreSQL      │
+                       │  (Datos locales) │
+                       └──────────────────┘
 ```
 
-## 🚀 Inicio Rápido
+## 🛠️ Instalación
 
-### Opción 1: Con Docker Compose (Recomendado)
+### Prerrequisitos
+- Go 1.21+
+- PostgreSQL 15+
+- Docker & Docker Compose (opcional)
+- Keycloak (solo si usas modo Keycloak)
 
+### 1. Clonar el repositorio
 ```bash
-# Clonar el repositorio
-git clone <repository-url>
+git clone https://github.com/tu-usuario/auth-go-microservicio.git
 cd auth-go-microservicio
-
-# Iniciar todos los servicios (incluyendo Keycloak)
-docker-compose up -d
-
-# Verificar servicios
-docker-compose ps
 ```
 
-**URLs disponibles:**
-- 🔐 **Keycloak Admin Console**: http://localhost:8081
-- 🌐 **API del Microservicio**: http://localhost:8080
-- 📚 **Swagger Documentation**: http://localhost:8080/swagger/index.html
+### 2. Configurar variables de entorno
+```bash
+cp env.example .env
+```
 
-### Opción 2: Desarrollo Local
+#### Para modo local (JWT):
+```bash
+# Configuración básica
+SERVER_PORT=8080
+DB_HOST=localhost
+DB_PASSWORD=password
+JWT_SECRET_KEY=your-super-secret-jwt-key
 
+# Deshabilitar Keycloak
+KEYCLOAK_ENABLED=false
+```
+
+#### Para modo Keycloak:
+```bash
+# Configuración básica
+SERVER_PORT=8080
+DB_HOST=localhost
+DB_PASSWORD=password
+
+# Habilitar Keycloak
+KEYCLOAK_ENABLED=true
+KEYCLOAK_BASE_URL=http://localhost:8081
+KEYCLOAK_REALM=master
+KEYCLOAK_CLIENT_ID=auth-service
+KEYCLOAK_CLIENT_SECRET=your-secret
+```
+
+### 3. Ejecutar con Docker Compose
+```bash
+# Incluye PostgreSQL y Keycloak (opcional)
+docker-compose up -d
+```
+
+### 4. Ejecutar localmente
 ```bash
 # Instalar dependencias
-go mod tidy
-
-# Configurar variables de entorno
-cp env.example .env
-# Editar .env según tus necesidades
+go mod download
 
 # Ejecutar migraciones
 make migrate
@@ -80,72 +108,11 @@ make migrate
 make run
 ```
 
-## ⚙️ Configuración
-
-### Variables de Entorno
-
-```bash
-# Configuración del servidor
-SERVER_PORT=8080
-SERVER_HOST=localhost
-
-# Base de datos
-DB_HOST=localhost
-DB_PORT=5432
-DB_USER=postgres
-DB_PASSWORD=password
-DB_NAME=auth_service
-DB_SSLMODE=disable
-
-# JWT
-JWT_SECRET_KEY=your-super-secret-jwt-key
-JWT_ACCESS_EXPIRY=15
-JWT_REFRESH_EXPIRY=7
-
-# Keycloak (opcional)
-KEYCLOAK_ENABLED=false
-KEYCLOAK_BASE_URL=http://localhost:8081
-KEYCLOAK_REALM=master
-KEYCLOAK_CLIENT_ID=auth-service
-KEYCLOAK_CLIENT_SECRET=your-keycloak-client-secret
-```
-
-## 🔐 Integración con Keycloak
-
-### Habilitar Keycloak
-
-1. **Configurar variables de entorno:**
-```bash
-KEYCLOAK_ENABLED=true
-KEYCLOAK_BASE_URL=http://localhost:8081
-KEYCLOAK_REALM=master
-KEYCLOAK_CLIENT_ID=auth-service
-KEYCLOAK_CLIENT_SECRET=your-secret
-```
-
-2. **Configurar Keycloak:**
-   - Acceder a http://localhost:8081
-   - Crear client `auth-service`
-   - Configurar roles y usuarios
-   - Ver [documentación completa](docs/KEYCLOAK_INTEGRATION.md)
-
-### Autenticación con Keycloak
-
-```bash
-# Obtener token de Keycloak
-curl -X POST http://localhost:8081/realms/master/protocol/openid-connect/token \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "grant_type=password&client_id=auth-service&client_secret=your-secret&username=admin&password=admin"
-
-# Usar token en el microservicio
-curl -X GET http://localhost:8080/api/v1/users/profile \
-  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
-```
-
 ## 📚 API Endpoints
 
 ### Autenticación (Públicos)
 - `POST /api/v1/auth/register` - Registro de usuario
+- `POST /api/v1/auth/register-admin` - Registro de administrador
 - `POST /api/v1/auth/login` - Login de usuario
 - `POST /api/v1/auth/refresh` - Renovar token
 - `POST /api/v1/auth/logout` - Logout de usuario
@@ -161,154 +128,112 @@ curl -X GET http://localhost:8080/api/v1/users/profile \
 - `PUT /api/v1/admin/users/{id}` - Actualizar usuario
 - `DELETE /api/v1/admin/users/{id}` - Eliminar usuario
 
-### Keycloak (Si está habilitado)
+### Keycloak (Solo si está habilitado)
 - `GET /api/v1/keycloak/users` - Listar usuarios de Keycloak
 - `POST /api/v1/keycloak/users` - Crear usuario en Keycloak
 - `PUT /api/v1/keycloak/users/{id}` - Actualizar usuario en Keycloak
 - `DELETE /api/v1/keycloak/users/{id}` - Eliminar usuario de Keycloak
-- `GET /api/v1/keycloak/users/{id}/groups` - Obtener grupos del usuario
-- `PUT /api/v1/keycloak/users/{id}/groups/{group_id}` - Agregar usuario a grupo
-- `DELETE /api/v1/keycloak/users/{id}/groups/{group_id}` - Remover usuario de grupo
+
+## 🔧 Configuración de Keycloak
+
+Si usas el modo Keycloak, sigue estos pasos:
+
+### 1. Acceder a Keycloak Admin Console
+- URL: `http://localhost:8081`
+- Usuario: `admin`
+- Contraseña: `admin`
+
+### 2. Crear Client
+1. Ir a "Clients" → "Create"
+2. Client ID: `auth-service`
+3. Client Protocol: `openid-connect`
+4. Root URL: `http://localhost:8080`
+
+### 3. Configurar Client
+- Access Type: `confidential`
+- Valid Redirect URIs: `http://localhost:8080/*`
+- Web Origins: `http://localhost:8080`
+
+### 4. Obtener Client Secret
+- Ir a "Credentials"
+- Copiar el Client Secret
+- Configurarlo en `KEYCLOAK_CLIENT_SECRET`
+
+Ver [documentación completa](docs/KEYCLOAK_INTEGRATION.md) para más detalles.
+
+## 🧪 Pruebas
+
+### Ejecutar script de pruebas
+```bash
+# PowerShell
+.\scripts\test-endpoints.ps1
+
+# Bash
+./scripts/test-endpoints.sh
+```
+
+### Probar manualmente
+```bash
+# 1. Registrar usuario
+curl -X POST http://localhost:8080/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "password123",
+    "first_name": "John",
+    "last_name": "Doe"
+  }'
+
+# 2. Login
+curl -X POST http://localhost:8080/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "password123"
+  }'
+
+# 3. Usar token
+curl -X GET http://localhost:8080/api/v1/users/profile \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## 📖 Documentación
+
+- **Swagger UI**: `http://localhost:8080/swagger/index.html`
+- **Health Check**: `http://localhost:8080/health`
+- **Keycloak Admin**: `http://localhost:8081` (solo modo Keycloak)
 
 ## 🛠️ Comandos Útiles
 
 ```bash
-# Ejecutar tests
-make test
+# Desarrollo
+make run          # Ejecutar servidor
+make build        # Compilar
+make test         # Ejecutar tests
+make migrate      # Ejecutar migraciones
 
-# Generar documentación Swagger
-make swagger
+# Docker
+make docker-build # Construir imagen
+make docker-run   # Ejecutar con Docker
 
-# Ejecutar migraciones
-make migrate
-
-# Limpiar build
-make clean
-
-# Construir imagen Docker
-make build
-
-# Ejecutar con Docker
-make docker-run
+# Documentación
+make swagger      # Generar documentación Swagger
 ```
 
-## 🏗️ Estructura del Proyecto
+## 🔄 Migración entre Modos
 
-```
-auth-go-microservicio/
-├── cmd/
-│   └── server/
-│       └── main.go                 # Punto de entrada
-├── configs/
-│   └── config.go                   # Configuración
-├── internal/
-│   ├── domain/
-│   │   ├── entities/               # Entidades del dominio
-│   │   └── repositories/           # Interfaces de repositorios
-│   ├── interface/
-│   │   ├── database/
-│   │   │   └── postgres/           # Implementación PostgreSQL
-│   │   └── http/
-│   │       ├── handlers/           # Manejadores HTTP
-│   │       └── routes/             # Configuración de rutas
-│   └── usecase/                    # Casos de uso
-├── pkg/
-│   ├── jwt/                        # Servicio JWT
-│   ├── keycloak/                   # Servicio Keycloak
-│   ├── middleware/                 # Middlewares
-│   └── password/                   # Servicio de contraseñas
-├── migrations/                     # Migraciones SQL
-├── docs/                          # Documentación
-├── docker-compose.yml             # Docker Compose
-├── Dockerfile                     # Dockerfile
-└── Makefile                       # Comandos útiles
-```
+### De Local a Keycloak
+1. Configurar Keycloak según la documentación
+2. Establecer `KEYCLOAK_ENABLED=true`
+3. Configurar variables de Keycloak
+4. Reiniciar el servidor
 
-## 🔧 Desarrollo
+### De Keycloak a Local
+1. Establecer `KEYCLOAK_ENABLED=false`
+2. Configurar `JWT_SECRET_KEY`
+3. Reiniciar el servidor
 
-### Prerrequisitos
-- Go 1.21+
-- PostgreSQL 15+
-- Docker y Docker Compose (opcional)
-- Keycloak (opcional)
-
-### Instalación Local
-
-```bash
-# Clonar repositorio
-git clone <repository-url>
-cd auth-go-microservicio
-
-# Instalar dependencias
-go mod download
-
-# Configurar base de datos
-# Crear base de datos PostgreSQL
-createdb auth_service
-
-# Ejecutar migraciones
-make migrate
-
-# Ejecutar tests
-make test
-
-# Iniciar servidor
-make run
-```
-
-### Generar Documentación Swagger
-
-```bash
-# Instalar swag CLI
-go install github.com/swaggo/swag/cmd/swag@latest
-
-# Generar documentación
-make swagger
-```
-
-## 🧪 Testing
-
-```bash
-# Ejecutar todos los tests
-make test
-
-# Ejecutar tests con coverage
-make test-coverage
-
-# Ejecutar tests específicos
-go test ./internal/usecase/...
-```
-
-## 🐳 Docker
-
-### Construir Imagen
-
-```bash
-# Construir imagen
-docker build -t auth-service .
-
-# Ejecutar contenedor
-docker run -p 8080:8080 auth-service
-```
-
-### Docker Compose
-
-```bash
-# Iniciar todos los servicios
-docker-compose up -d
-
-# Ver logs
-docker-compose logs -f
-
-# Detener servicios
-docker-compose down
-```
-
-## 📚 Documentación
-
-- [📖 Guía de Integración con Keycloak](docs/KEYCLOAK_INTEGRATION.md)
-- [📖 Configuración de Swagger](docs/SWAGGER_SETUP.md)
-- [📖 API Documentation](docs/API.md)
+El sistema detecta automáticamente qué modo usar basado en la configuración.
 
 ## 🤝 Contribuir
 
@@ -318,17 +243,9 @@ docker-compose down
 4. Push a la rama (`git push origin feature/AmazingFeature`)
 5. Abrir un Pull Request
 
+
 ## 🆘 Soporte
 
-Si tienes problemas o preguntas:
-
-1. Revisar la [documentación](docs/)
-2. Buscar en [issues existentes](../../issues)
-3. Crear un nuevo [issue](../../issues/new)
-
-## 🔗 Enlaces Útiles
-
-- [Keycloak Documentation](https://www.keycloak.org/documentation)
-- [Gin Framework](https://gin-gonic.com/)
-- [Clean Architecture](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html)
-- [JWT.io](https://jwt.io/) 
+- 📧 Email: support@example.com
+- 📖 Documentación: [docs/](docs/)
+- 🐛 Issues: [GitHub Issues](https://github.com/tu-usuario/auth-go-microservicio/issues)

@@ -49,6 +49,38 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	})
 }
 
+// RegisterAdmin godoc
+// @Summary      Registro de usuario administrador
+// @Description  Registra un nuevo usuario administrador en el sistema
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Param        request body usecase.RegisterRequest true "Datos de registro de administrador"
+// @Success      201  {object}  map[string]interface{}
+// @Failure      400  {object}  map[string]interface{}
+// @Router       /auth/register-admin [post]
+func (h *AuthHandler) RegisterAdmin(c *gin.Context) {
+	var req usecase.RegisterRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Forzar el rol de administrador
+	req.Role = "admin"
+
+	response, err := h.authUseCase.Register(c.Request.Context(), &req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "admin user registered successfully",
+		"data":    response,
+	})
+}
+
 // Login godoc
 // @Summary      Login de usuario
 // @Description  Autentica un usuario y retorna tokens de acceso

@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"auth-go-microservicio/configs"
-	"auth-go-microservicio/internal/domain/repositories"
 	"auth-go-microservicio/internal/interface/database/postgres"
 	"auth-go-microservicio/internal/interface/http/handlers"
 	"auth-go-microservicio/internal/interface/http/routes"
@@ -91,75 +90,69 @@ func main() {
 	passwordService := password.NewService(12) // bcrypt cost 12
 
 	// Inicializar repositorios
-	var userRepo repositories.UserRepository
-	var tokenRepo repositories.TokenRepository
+	userRepo := postgres.NewUserRepository(db)
+	tokenRepo := postgres.NewTokenRepository(db)
 
-	// Si Keycloak está habilitado, usar repositorios de Keycloak
+	// Inicializar servicios de Keycloak (opcional)
+	var keycloakService keycloak.Service
+	var keycloakConfig *usecase.KeycloakConfig
+
 	if config.Keycloak.Enabled {
-		keycloakService := keycloak.NewService(
+		keycloakService = keycloak.NewService(
 			config.Keycloak.BaseURL,
 			config.Keycloak.Realm,
 			config.Keycloak.ClientID,
 			config.Keycloak.ClientSecret,
 		)
 
-		// Para Keycloak, podríamos usar repositorios híbridos o solo Keycloak
-		// Por ahora, mantenemos los repositorios de PostgreSQL para datos adicionales
-		userRepo = postgres.NewUserRepository(db)
-		tokenRepo = postgres.NewTokenRepository(db)
+		keycloakConfig = &usecase.KeycloakConfig{
+			BaseURL:      config.Keycloak.BaseURL,
+			Realm:        config.Keycloak.Realm,
+			ClientID:     config.Keycloak.ClientID,
+			ClientSecret: config.Keycloak.ClientSecret,
+		}
 
-		// Inicializar use cases
-		authUseCase := usecase.NewAuthUseCase(userRepo, tokenRepo, jwtService, passwordService)
-		userUseCase := usecase.NewUserUseCase(userRepo, passwordService)
-
-		// Inicializar middlewares
-		authMiddleware := middleware.NewAuthMiddleware(jwtService)
-		keycloakMiddleware := middleware.NewKeycloakMiddleware(keycloakService)
-
-		// Inicializar handlers
-		authHandler := handlers.NewAuthHandler(authUseCase)
-		userHandler := handlers.NewUserHandler(userUseCase)
-		keycloakHandler := handlers.NewKeycloakHandler(keycloakService)
-
-		// Configurar rutas
-		router := routes.SetupRoutes(authHandler, userHandler, keycloakHandler, authMiddleware, keycloakMiddleware, config)
-
-		// Iniciar servidor
-		serverAddr := fmt.Sprintf("%s:%s", config.Server.Host, config.Server.Port)
-		log.Printf("🚀 Servidor iniciado en %s", serverAddr)
-		log.Printf("📚 Swagger UI disponible en http://%s/swagger/index.html", serverAddr)
 		log.Printf("🔐 Keycloak habilitado - Realm: %s", config.Keycloak.Realm)
-
-		if err := http.ListenAndServe(serverAddr, router); err != nil {
-			log.Fatal("Error starting server:", err)
-		}
 	} else {
-		// Modo sin Keycloak (funcionalidad original)
-		userRepo = postgres.NewUserRepository(db)
-		tokenRepo = postgres.NewTokenRepository(db)
-
-		// Inicializar use cases
-		authUseCase := usecase.NewAuthUseCase(userRepo, tokenRepo, jwtService, passwordService)
-		userUseCase := usecase.NewUserUseCase(userRepo, passwordService)
-
-		// Inicializar middleware
-		authMiddleware := middleware.NewAuthMiddleware(jwtService)
-
-		// Inicializar handlers
-		authHandler := handlers.NewAuthHandler(authUseCase)
-		userHandler := handlers.NewUserHandler(userUseCase)
-
-		// Configurar rutas (sin Keycloak)
-		router := routes.SetupRoutes(authHandler, userHandler, nil, authMiddleware, nil, config)
-
-		// Iniciar servidor
-		serverAddr := fmt.Sprintf("%s:%s", config.Server.Host, config.Server.Port)
-		log.Printf("🚀 Servidor iniciado en %s", serverAddr)
-		log.Printf("📚 Swagger UI disponible en http://%s/swagger/index.html", serverAddr)
 		log.Printf("🔐 Modo autenticación local (sin Keycloak)")
+	}
 
-		if err := http.ListenAndServe(serverAddr, router); err != nil {
-			log.Fatal("Error starting server:", err)
-		}
+	// Inicializar use cases (detecta automáticamente si usar Keycloak)
+	authUseCase := usecase.NewAuthUseCase(userRepo, tokenRepo, jwtService, passwordService, keycloakService, keycloakConfig)
+	userUseCase := usecase.NewUserUseCase(userRepo, passwordService)
+
+	// Inicializar middlewares
+	authMiddleware := middleware.NewAuthMiddleware(jwtService, keycloakService, config.Keycloak.Enabled)
+
+	var keycloakMiddleware *middleware.KeycloakMiddleware
+	if config.Keycloak.Enabled {
+		keycloakMiddleware = middleware.NewKeycloakMiddleware(keycloakService)
+	}
+
+	// Inicializar handlers
+	authHandler := handlers.NewAuthHandler(authUseCase)
+	userHandler := handlers.NewUserHandler(userUseCase)
+
+	var keycloakHandler *handlers.KeycloakHandler
+	if config.Keycloak.Enabled {
+		keycloakHandler = handlers.NewKeycloakHandler(keycloakService)
+	}
+
+	// Configurar rutas
+	router := routes.SetupRoutes(authHandler, userHandler, keycloakHandler, authMiddleware, keycloakMiddleware, config)
+
+	// Iniciar servidor
+	serverAddr := fmt.Sprintf("%s:%s", config.Server.Host, config.Server.Port)
+	log.Printf("🚀 Servidor iniciado en %s", serverAddr)
+	log.Printf("📚 Swagger UI disponible en http://%s/swagger/index.html", serverAddr)
+
+	if authUseCase.IsUsingKeycloak() {
+		log.Printf("🔐 Autenticación: Keycloak")
+	} else {
+		log.Printf("🔐 Autenticación: Local (JWT)")
+	}
+
+	if err := http.ListenAndServe(serverAddr, router); err != nil {
+		log.Fatal("Error starting server:", err)
 	}
 }
