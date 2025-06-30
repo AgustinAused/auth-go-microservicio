@@ -1,13 +1,15 @@
 package keycloak
 
 import (
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
-	"gopkg.in/square/go-jose.v2"
 	"gopkg.in/square/go-jose.v2/jwt"
 )
 
@@ -32,6 +34,9 @@ type service struct {
 	clientID     string
 	clientSecret string
 	httpClient   *http.Client
+
+	publicKey       interface{}
+	publicKeyExpiry time.Time
 }
 
 // NewService crea una nueva instancia del servicio de Keycloak
@@ -44,6 +49,8 @@ func NewService(baseURL, realm, clientID, clientSecret string) Service {
 		httpClient:   &http.Client{Timeout: 30 * time.Second},
 	}
 }
+
+const publicKeyTTL = time.Hour
 
 // KeycloakClaims representa los claims del token JWT de Keycloak
 type KeycloakClaims struct {
@@ -159,15 +166,15 @@ func (s *service) ValidateToken(tokenString string) (*KeycloakClaims, error) {
 		return nil, fmt.Errorf("error parsing token: %w", err)
 	}
 
-	// Verificar la firma
-	if err := token.Claims(publicKey, &KeycloakClaims{}); err != nil {
-		return nil, fmt.Errorf("error verifying token: %w", err)
-	}
-
-	// Extraer claims
 	var claims KeycloakClaims
 	if err := token.Claims(publicKey, &claims); err != nil {
-		return nil, fmt.Errorf("error extracting claims: %w", err)
+		// reintentar refrescando la clave
+		if publicKey, err = s.refreshPublicKey(); err != nil {
+			return nil, fmt.Errorf("error verifying token: %w", err)
+		}
+		if err := token.Claims(publicKey, &claims); err != nil {
+			return nil, fmt.Errorf("error verifying token: %w", err)
+		}
 	}
 
 	// Validar tiempo de expiración
@@ -474,6 +481,10 @@ func (s *service) RemoveUserFromGroup(userID, groupID string) error {
 
 // getPublicKey obtiene la clave pública de Keycloak
 func (s *service) getPublicKey() (interface{}, error) {
+	if s.publicKey != nil && time.Now().Before(s.publicKeyExpiry) {
+		return s.publicKey, nil
+	}
+
 	url := fmt.Sprintf("%s/realms/%s", s.baseURL, s.realm)
 
 	resp, err := s.httpClient.Get(url)
@@ -490,13 +501,27 @@ func (s *service) getPublicKey() (interface{}, error) {
 		return nil, err
 	}
 
-	// Parsear la clave pública
-	publicKey, err := jose.ParseSigned(realmInfo.PublicKey)
+	pemData := fmt.Sprintf("-----BEGIN PUBLIC KEY-----\n%s\n-----END PUBLIC KEY-----", realmInfo.PublicKey)
+	block, _ := pem.Decode([]byte(pemData))
+	if block == nil {
+		return nil, errors.New("failed to decode public key")
+	}
+
+	key, err := x509.ParsePKIXPublicKey(block.Bytes)
 	if err != nil {
 		return nil, err
 	}
 
-	return publicKey, nil
+	s.publicKey = key
+	s.publicKeyExpiry = time.Now().Add(publicKeyTTL)
+
+	return key, nil
+}
+
+func (s *service) refreshPublicKey() (interface{}, error) {
+	s.publicKey = nil
+	s.publicKeyExpiry = time.Time{}
+	return s.getPublicKey()
 }
 
 // getAdminToken obtiene un token de administrador
