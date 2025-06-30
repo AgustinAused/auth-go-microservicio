@@ -1,7 +1,9 @@
 package keycloak
 
 import (
+	"crypto/rsa"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -484,12 +486,11 @@ func (s *service) getPublicKey() (interface{}, error) {
 	if s.publicKey != nil && time.Now().Before(s.publicKeyExpiry) {
 		return s.publicKey, nil
 	}
-
 	url := fmt.Sprintf("%s/realms/%s", s.baseURL, s.realm)
 
 	resp, err := s.httpClient.Get(url)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("requesting realm info: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -498,7 +499,7 @@ func (s *service) getPublicKey() (interface{}, error) {
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&realmInfo); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decoding realm info: %w", err)
 	}
 
 	pemData := fmt.Sprintf("-----BEGIN PUBLIC KEY-----\n%s\n-----END PUBLIC KEY-----", realmInfo.PublicKey)
@@ -509,7 +510,17 @@ func (s *service) getPublicKey() (interface{}, error) {
 
 	key, err := x509.ParsePKIXPublicKey(block.Bytes)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decoding public key: %w", err)
+	}
+
+	parsedKey, err := x509.ParsePKIXPublicKey(keyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("parsing public key: %w", err)
+	}
+
+	rsaKey, ok := parsedKey.(*rsa.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("unexpected key type %T", parsedKey)
 	}
 
 	s.publicKey = key
