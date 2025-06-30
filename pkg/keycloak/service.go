@@ -1,13 +1,15 @@
 package keycloak
 
 import (
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
-	"gopkg.in/square/go-jose.v2"
 	"gopkg.in/square/go-jose.v2/jwt"
 )
 
@@ -159,15 +161,9 @@ func (s *service) ValidateToken(tokenString string) (*KeycloakClaims, error) {
 		return nil, fmt.Errorf("error parsing token: %w", err)
 	}
 
-	// Verificar la firma
-	if err := token.Claims(publicKey, &KeycloakClaims{}); err != nil {
-		return nil, fmt.Errorf("error verifying token: %w", err)
-	}
-
-	// Extraer claims
 	var claims KeycloakClaims
 	if err := token.Claims(publicKey, &claims); err != nil {
-		return nil, fmt.Errorf("error extracting claims: %w", err)
+		return nil, fmt.Errorf("error verifying token: %w", err)
 	}
 
 	// Validar tiempo de expiración
@@ -473,12 +469,12 @@ func (s *service) RemoveUserFromGroup(userID, groupID string) error {
 }
 
 // getPublicKey obtiene la clave pública de Keycloak
-func (s *service) getPublicKey() (interface{}, error) {
+func (s *service) getPublicKey() (*rsa.PublicKey, error) {
 	url := fmt.Sprintf("%s/realms/%s", s.baseURL, s.realm)
 
 	resp, err := s.httpClient.Get(url)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("requesting realm info: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -487,16 +483,25 @@ func (s *service) getPublicKey() (interface{}, error) {
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&realmInfo); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decoding realm info: %w", err)
 	}
 
-	// Parsear la clave pública
-	publicKey, err := jose.ParseSigned(realmInfo.PublicKey)
+	keyBytes, err := base64.StdEncoding.DecodeString(realmInfo.PublicKey)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decoding public key: %w", err)
 	}
 
-	return publicKey, nil
+	parsedKey, err := x509.ParsePKIXPublicKey(keyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("parsing public key: %w", err)
+	}
+
+	rsaKey, ok := parsedKey.(*rsa.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("unexpected key type %T", parsedKey)
+	}
+
+	return rsaKey, nil
 }
 
 // getAdminToken obtiene un token de administrador
