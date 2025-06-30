@@ -1,14 +1,13 @@
 package keycloak
 
 import (
-	"crypto/rsa"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"net/http"
+	url2 "net/url"
 	"strings"
 	"time"
 
@@ -20,6 +19,7 @@ type Service interface {
 	ValidateToken(tokenString string) (*KeycloakClaims, error)
 	GetUserInfo(tokenString string) (*UserInfo, error)
 	GetUserByID(userID string) (*UserInfo, error)
+	Login(username, password string) (string, error)
 	CreateUser(user *CreateUserRequest) error
 	UpdateUser(userID string, user *UpdateUserRequest) error
 	DeleteUser(userID string) error
@@ -513,16 +513,6 @@ func (s *service) getPublicKey() (interface{}, error) {
 		return nil, fmt.Errorf("decoding public key: %w", err)
 	}
 
-	parsedKey, err := x509.ParsePKIXPublicKey(keyBytes)
-	if err != nil {
-		return nil, fmt.Errorf("parsing public key: %w", err)
-	}
-
-	rsaKey, ok := parsedKey.(*rsa.PublicKey)
-	if !ok {
-		return nil, fmt.Errorf("unexpected key type %T", parsedKey)
-	}
-
 	s.publicKey = key
 	s.publicKeyExpiry = time.Now().Add(publicKeyTTL)
 
@@ -556,6 +546,45 @@ func (s *service) getAdminToken() (string, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("error getting admin token: %d", resp.StatusCode)
+	}
+
+	var tokenResponse struct {
+		AccessToken string `json:"access_token"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResponse); err != nil {
+		return "", err
+	}
+
+	return tokenResponse.AccessToken, nil
+}
+
+// Login authenticates a user using username and password and returns an access token
+func (s *service) Login(username, password string) (string, error) {
+	url := fmt.Sprintf("%s/realms/%s/protocol/openid-connect/token", s.baseURL, s.realm)
+
+	data := url2.Values{}
+	data.Set("grant_type", "password")
+	data.Set("client_id", s.clientID)
+	data.Set("client_secret", s.clientSecret)
+	data.Set("username", username)
+	data.Set("password", password)
+
+	req, err := http.NewRequest("POST", url, strings.NewReader(data.Encode()))
+	if err != nil {
+		return "", err
+	}
+
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("error getting user token: %d", resp.StatusCode)
 	}
 
 	var tokenResponse struct {

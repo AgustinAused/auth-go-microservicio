@@ -431,45 +431,7 @@ func (uc *AuthUseCase) refreshLocal(ctx context.Context, req *RefreshRequest) (*
 
 // getKeycloakToken obtiene un token de acceso de Keycloak
 func (uc *AuthUseCase) getKeycloakToken(username, password string) (string, error) {
-	tokenURL := fmt.Sprintf("%s/realms/%s/protocol/openid-connect/token", uc.keycloakConfig.BaseURL, uc.keycloakConfig.Realm)
-
-	data := url.Values{}
-	data.Set("grant_type", "password")
-	data.Set("client_id", uc.keycloakConfig.ClientID)
-	data.Set("client_secret", uc.keycloakConfig.ClientSecret)
-	data.Set("username", username)
-	data.Set("password", password)
-
-	req, err := http.NewRequest("POST", tokenURL, strings.NewReader(data.Encode()))
-	if err != nil {
-		return "", err
-	}
-
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("error getting token: %d", resp.StatusCode)
-	}
-
-	var tokenResponse struct {
-		AccessToken  string `json:"access_token"`
-		RefreshToken string `json:"refresh_token"`
-		TokenType    string `json:"token_type"`
-		ExpiresIn    int    `json:"expires_in"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResponse); err != nil {
-		return "", err
-	}
-
-	return tokenResponse.AccessToken, nil
+	return uc.keycloakService.Login(username, password)
 }
 
 // refreshKeycloakToken renueva un token usando el refresh token
