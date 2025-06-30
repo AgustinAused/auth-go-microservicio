@@ -5,6 +5,8 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -34,6 +36,9 @@ type service struct {
 	clientID     string
 	clientSecret string
 	httpClient   *http.Client
+
+	publicKey       interface{}
+	publicKeyExpiry time.Time
 }
 
 // NewService crea una nueva instancia del servicio de Keycloak
@@ -46,6 +51,8 @@ func NewService(baseURL, realm, clientID, clientSecret string) Service {
 		httpClient:   &http.Client{Timeout: 30 * time.Second},
 	}
 }
+
+const publicKeyTTL = time.Hour
 
 // KeycloakClaims representa los claims del token JWT de Keycloak
 type KeycloakClaims struct {
@@ -163,7 +170,13 @@ func (s *service) ValidateToken(tokenString string) (*KeycloakClaims, error) {
 
 	var claims KeycloakClaims
 	if err := token.Claims(publicKey, &claims); err != nil {
-		return nil, fmt.Errorf("error verifying token: %w", err)
+		// reintentar refrescando la clave
+		if publicKey, err = s.refreshPublicKey(); err != nil {
+			return nil, fmt.Errorf("error verifying token: %w", err)
+		}
+		if err := token.Claims(publicKey, &claims); err != nil {
+			return nil, fmt.Errorf("error verifying token: %w", err)
+		}
 	}
 
 	// Validar tiempo de expiración
@@ -469,7 +482,10 @@ func (s *service) RemoveUserFromGroup(userID, groupID string) error {
 }
 
 // getPublicKey obtiene la clave pública de Keycloak
-func (s *service) getPublicKey() (*rsa.PublicKey, error) {
+func (s *service) getPublicKey() (interface{}, error) {
+	if s.publicKey != nil && time.Now().Before(s.publicKeyExpiry) {
+		return s.publicKey, nil
+	}
 	url := fmt.Sprintf("%s/realms/%s", s.baseURL, s.realm)
 
 	resp, err := s.httpClient.Get(url)
@@ -486,7 +502,13 @@ func (s *service) getPublicKey() (*rsa.PublicKey, error) {
 		return nil, fmt.Errorf("decoding realm info: %w", err)
 	}
 
-	keyBytes, err := base64.StdEncoding.DecodeString(realmInfo.PublicKey)
+	pemData := fmt.Sprintf("-----BEGIN PUBLIC KEY-----\n%s\n-----END PUBLIC KEY-----", realmInfo.PublicKey)
+	block, _ := pem.Decode([]byte(pemData))
+	if block == nil {
+		return nil, errors.New("failed to decode public key")
+	}
+
+	key, err := x509.ParsePKIXPublicKey(block.Bytes)
 	if err != nil {
 		return nil, fmt.Errorf("decoding public key: %w", err)
 	}
@@ -501,7 +523,16 @@ func (s *service) getPublicKey() (*rsa.PublicKey, error) {
 		return nil, fmt.Errorf("unexpected key type %T", parsedKey)
 	}
 
-	return rsaKey, nil
+	s.publicKey = key
+	s.publicKeyExpiry = time.Now().Add(publicKeyTTL)
+
+	return key, nil
+}
+
+func (s *service) refreshPublicKey() (interface{}, error) {
+	s.publicKey = nil
+	s.publicKeyExpiry = time.Time{}
+	return s.getPublicKey()
 }
 
 // getAdminToken obtiene un token de administrador
